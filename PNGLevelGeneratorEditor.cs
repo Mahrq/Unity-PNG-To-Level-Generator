@@ -37,36 +37,36 @@ namespace Mahrq
         private string presetName = "Preset 001";
         [SerializeField]
         private string levelName = "New Level";
-        private GameObject levelHolder;
+        private GameObject levelHolder = null;
         [SerializeField]
-        private float spacing;
+        private float spacing = 0f;
         [SerializeField]
-        private BuildCoordinate buildCoordinates;
+        private BuildCoordinate buildCoordinates = BuildCoordinate.xy;
         [SerializeField]
-        private bool affectRotation;
+        private bool affectRotation = false;
         [SerializeField]
-        private RotationAxis affectedAxis;
+        private RotationAxis affectedAxis = RotationAxis.None;
         [SerializeField]
-        private Texture2D pngMapToScan;
+        private Texture2D pngMapToScan = null;
         [SerializeField]
-        private ColorToPrefab[] colorToPrefab;
+        private ColorToPrefab[] colorToPrefab = null;
         [SerializeField]
-        private LevelGeneratorEditorSaveData[] savedPresets;
+        private LevelGeneratorEditorSaveData[] savedPresets = new LevelGeneratorEditorSaveData[10];
 
         private ScriptableObject target;
         private SerializedObject serializedObject;
         private SerializedProperty colorCode;
         private SerializedProperty savedPresetsProperty;
 
-        private Vector2 scrollPos;
+        private Vector2 scrollPos = Vector2.zero;
 
         [SerializeField]
-        private string[] options;
+        private string[] options = new string[10];
         [SerializeField]
         private int savedPresetindex = 0;
-        private int overwriteWarning;
-        private int previousOverwriteIndex = 0;
-        private int deleteWarning;
+        private int overwriteWarning = 0;
+        private int previousOverwriteIndex = -1;
+        private int deleteWarning = 0;
         private int previousDeleteIndex = -1;
 
         [MenuItem("Mahrq/Level Generator/PNG Scanner")]
@@ -163,7 +163,7 @@ namespace Mahrq
                 {
                     if (PresetNameAlreadyExists(presetName, ref currentIndex))
                     {
-						savedPresetindex = currentIndex;
+                        savedPresetindex = currentIndex;
                         Debug.LogWarning($"Preset: {presetName} already exists" +
                             $"\nSwitching to {presetName} preset slot.");
                     }
