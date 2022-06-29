@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEditor;
+using System.Collections.Generic;
 namespace Mahrq
 {
     /// <summary>
@@ -16,6 +17,7 @@ namespace Mahrq
     ///                 19/09/2019 - Reads alpha channel to determine inital spawn rotation of the prefab.
     ///                 27/06/2022 - Added more options, styling and tool tips.
     ///                 28/06/2022 - Added save preset feature.
+    ///                 30/06/2022 - Fixed major bugs like null exceptions in play mode. Preset settings saved even when closing the unity editor.
     /// 
     /// Notes:          PNG setup when importing into asset folder:
     ///                 1 - Enable read and writing in advanced dropdown
@@ -26,13 +28,11 @@ namespace Mahrq
     /// Bugs:           When loading a preset, you won't be able to change any of the Color Code properties unless
     ///                 you close the editor window or click the + to add an element.
     ///                 You can click the - to revert to what you had just before.
-    ///                 
-    ///                 !Preset color code values are lost when re-opening the unity editor! to fix soon.
-    ///                 
-    ///                 Null referance errors in play mode. Just reload the editor window. 
     /// </summary>
     public class PNGLevelGeneratorEditor : EditorWindow
     {
+        private static PNGLevelGeneratorEditor window;
+        private string editorPrefKey = "pngToLevel";
         [SerializeField]
         private string presetName = "Preset 001";
         [SerializeField]
@@ -49,11 +49,10 @@ namespace Mahrq
         [SerializeField]
         private Texture2D pngMapToScan = null;
         [SerializeField]
-        private ColorToPrefab[] colorToPrefab = null;
+        private ColorToPrefab[] colorToPrefabCollection = null;
         [SerializeField]
         private LevelGeneratorEditorSaveData[] savedPresets = new LevelGeneratorEditorSaveData[10];
 
-        private ScriptableObject target;
         private SerializedObject serializedObject;
         private SerializedProperty colorCode;
         private SerializedProperty savedPresetsProperty;
@@ -68,43 +67,68 @@ namespace Mahrq
         private int previousOverwriteIndex = -1;
         private int deleteWarning = 0;
         private int previousDeleteIndex = -1;
+        [SerializeField]
+        private StyleLibrary styleLibrary = new StyleLibrary();
 
         [MenuItem("Mahrq/Level Generator/PNG Scanner")]
         static void StartWindow()
         {
-            PNGLevelGeneratorEditor levelGeneratorEditor = GetWindow<PNGLevelGeneratorEditor>();
-            levelGeneratorEditor.Show();
+            window = GetWindow<PNGLevelGeneratorEditor>();
+            window.Show();
         }
         /// <summary>
         /// Initialise serialised objects and properties and load a previous state if used before.
         /// </summary>
         private void OnEnable()
         {
-            //Load saved state of the window if it exist.
-            if (EditorPrefs.HasKey("pngToLevel"))
+            if (!Application.isPlaying)
             {
-                string savedItems = EditorPrefs.GetString("pngToLevel", JsonUtility.ToJson(this, false));
-                JsonUtility.FromJsonOverwrite(savedItems, this);
-            }
-            //Serialize ColorToPrefab
-            target = this;
-            serializedObject = new SerializedObject(target);
-            colorCode = serializedObject.FindProperty("colorToPrefab");
-            savedPresetsProperty = serializedObject.FindProperty("savedPresets");
+                window = this;
+                //Load saved state of the window if it exist.
+                if (EditorPrefs.HasKey(editorPrefKey))
+                {
+                    string savedItems = EditorPrefs.GetString(editorPrefKey, JsonUtility.ToJson(this, false));
+                    JsonUtility.FromJsonOverwrite(savedItems, this);
+                    if (savedPresets.Length > 0)
+                    {
+                        for (int i = 0; i < savedPresets.Length; i++)
+                        {
+                            if (savedPresets[i] != null)
+                            {
+                                savedPresets[i].LoadAssetPaths();
+                            }
+                        }
+                        if (savedPresets[savedPresetindex] != null)
+                        {
+                            savedPresets[savedPresetindex].LoadData(ref window);
+                        }
+                    }
+                }
+                //Serialize ColorToPrefab
+                serializedObject = new SerializedObject(this);
+                colorCode = serializedObject.FindProperty("colorToPrefabCollection");
+                savedPresetsProperty = serializedObject.FindProperty("savedPresets");
 
-            InitialiseEditorStyling();
-            InitialiseToolTips();
-            //Hardcoding 10 preset slots
-            if (options.Length < 10)
-            {
-                options = new string[10];
-                
+                if (styleLibrary.Collection.Count == 0)
+                {
+                    styleLibrary.Add(EditorStyles.popup);
+                    styleLibrary.Add(EditorStyles.toggle);
+                }
+
+                InitialiseEditorStyling();
+                InitialiseToolTips();
+                //Hardcoding 10 preset slots
+                if (options.Length < 10)
+                {
+                    options = new string[10];
+
+                }
+                if (savedPresets.Length < 10)
+                {
+                    savedPresets = new LevelGeneratorEditorSaveData[10];
+                }
+                options = GetPresetCollectionOptions(savedPresets);
             }
-            if (savedPresets.Length < 10)
-            {
-                savedPresets = new LevelGeneratorEditorSaveData[10];
-            }
-            options = GetPresetCollectionOptions(savedPresets);
         }
         /// <summary>
         /// Save the input fields of the window when closing.
@@ -112,8 +136,21 @@ namespace Mahrq
         /// </summary>
         private void OnDisable()
         {
+            if (savedPresets != null)
+            {
+                if (savedPresets.Length > 0)
+                {
+                    for (int i = 0; i < savedPresets.Length; i++)
+                    {
+                        if (savedPresets[i] != null)
+                        {
+                            savedPresets[i].SaveAssetPaths();
+                        }
+                    }
+                }
+            }
             string savedItems = JsonUtility.ToJson(this, false);
-            EditorPrefs.SetString("pngToLevel", savedItems);
+            EditorPrefs.SetString(editorPrefKey, savedItems);
         }
         private void OnGUI()
         {
@@ -148,7 +185,7 @@ namespace Mahrq
                     if (overwriteWarning > 1)
                     {
                         overwriteWarning = 0;
-                        savedPresets[currentIndex].SaveData(presetName, levelName, spacing, buildCoordinates, affectRotation, affectedAxis, pngMapToScan, colorToPrefab);
+                        savedPresets[currentIndex].SaveData(presetName, levelName, spacing, buildCoordinates, affectRotation, affectedAxis, pngMapToScan, colorToPrefabCollection);
                         options[currentIndex] = savedPresets[currentIndex]._presetName;
                         Debug.Log($"Preset: {options[currentIndex]} overwritten.");
                     }
@@ -169,7 +206,7 @@ namespace Mahrq
                     }
                     else
                     {
-                        savedPresets[currentIndex].SaveData(presetName, levelName, spacing, buildCoordinates, affectRotation, affectedAxis, pngMapToScan, colorToPrefab);
+                        savedPresets[currentIndex].SaveData(presetName, levelName, spacing, buildCoordinates, affectRotation, affectedAxis, pngMapToScan, colorToPrefabCollection);
                         options[currentIndex] = savedPresets[currentIndex]._presetName;
                     }
                 }
@@ -183,15 +220,7 @@ namespace Mahrq
                 int currentIndex = savedPresetindex;
                 if (PresetSlotOccupied)
                 {
-                    LevelGeneratorEditorSaveData data = savedPresets[currentIndex].LoadData();
-                    presetName = data._presetName;
-                    levelName = data._levelName;
-                    spacing = data._spacing;
-                    buildCoordinates = data._buildCoordinates;
-                    affectRotation = data._affectRotation;
-                    affectedAxis = data._affectedAxis;
-                    pngMapToScan = data._pngMapToScan;
-                    colorToPrefab = data._colorToPrefab;
+                    savedPresets[currentIndex].LoadData(ref window);
                     Debug.Log($"Preset: {presetName} loaded");
                 }
                 EditorGUI.FocusTextInControl(null);
@@ -283,7 +312,7 @@ namespace Mahrq
             //Button to generate level
             if (GUILayout.Button("Generate Level", editorSkin.button))
             {
-                if (pngMapToScan != null && colorToPrefab.Length > 0)
+                if (pngMapToScan != null && colorToPrefabCollection.Length > 0)
                 {
                     GenerateLevel(pngMapToScan);
                 }
@@ -347,18 +376,18 @@ namespace Mahrq
                         }
                     }
                     //Iterate through the colorToPrefab array and see if the pixel color matches the color stored in the array.
-                    for (int i = 0; i < colorToPrefab.Length; i++)
+                    for (int i = 0; i < colorToPrefabCollection.Length; i++)
                     {
-                        if (RGBMatch(pixelColor, colorToPrefab[i].color))
+                        if (RGBMatch(pixelColor, colorToPrefabCollection[i].color))
                         {
                             if (!affectRotation)
                             {
-                                Vector3 prefabRotation = colorToPrefab[i].prefab.transform.rotation.eulerAngles;
+                                Vector3 prefabRotation = colorToPrefabCollection[i].prefab.transform.rotation.eulerAngles;
                                 spawnRotation = Quaternion.Euler(prefabRotation);
                             }
                             spawnLocation = GetSpawnPosition(buildCoordinates, (float)x, (float)y, spacing);
                             //Instantiate object and set its parent to the empty GameObject.
-                            (Instantiate(colorToPrefab[i].prefab, spawnLocation, spawnRotation) as GameObject).transform.parent = levelHolder.transform;
+                            (Instantiate(colorToPrefabCollection[i].prefab, spawnLocation, spawnRotation) as GameObject).transform.parent = levelHolder.transform;
                         }
                     }
                 }
@@ -517,7 +546,7 @@ namespace Mahrq
             s_smallButtons.fixedWidth = 50f;
             //Popup menu
             editorSkin.customStyles = new GUIStyle[2];
-            editorSkin.customStyles[0] = new GUIStyle(EditorStyles.popup);
+            editorSkin.customStyles[0] = styleLibrary.Collection[(int)StyleLibrary.Style.PopUp];
             editorSkin.customStyles[0].normal.textColor = pink;
             editorSkin.customStyles[0].hover.textColor = pink;
             editorSkin.customStyles[0].active.textColor = pink;
@@ -529,7 +558,7 @@ namespace Mahrq
             editorSkin.customStyles[0].alignment = TextAnchor.MiddleLeft;
             editorSkin.customStyles[0].padding = new RectOffset(5, 0, 0, 0);
             //Toggle
-            editorSkin.customStyles[1] = new GUIStyle(EditorStyles.toggle);
+            editorSkin.customStyles[1] = styleLibrary.Collection[(int)StyleLibrary.Style.Toggle];
 
             editorSkin.settings.selectionColor = pink;
             editorSkin.settings.cursorColor = magenta;
@@ -581,7 +610,6 @@ namespace Mahrq
         }
         private bool PresetSlotOccupied => options[savedPresetindex] != "[Empty]" && !string.IsNullOrEmpty(savedPresets[savedPresetindex]._presetName) 
                     && options[savedPresetindex] == savedPresets[savedPresetindex]._presetName;
-
         public enum BuildCoordinate
         {
             xy,
@@ -596,6 +624,41 @@ namespace Mahrq
             Y = 1 << 1,
             Z = 1 << 2
         }
+        [System.Serializable]
+        public class StyleLibrary
+        {
+            [SerializeField]
+            private List<GUIStyle> _collection;
+            public List<GUIStyle> Collection => _collection;
+
+            public StyleLibrary()
+            {
+                _collection = new List<GUIStyle>();
+            }
+            public void Add(GUIStyle style)
+            {
+                if (_collection == null)
+                {
+                    _collection = new List<GUIStyle>();
+                }
+                GUIStyle copy = new GUIStyle(style);
+                _collection.Add(copy);
+            }
+            public enum Style
+            {
+                PopUp,
+                Toggle
+            }
+        }
+
+        public string PresetName { get { return presetName; } set { presetName = value; } }
+        public string LevelName { get { return levelName; } set { levelName = value; } }
+        public float Spacing { get { return spacing; } set { spacing = value; } }
+        public BuildCoordinate BuildCoordinates { get { return buildCoordinates; } set { buildCoordinates = value; } }
+        public bool AffectRotation { get { return affectRotation; } set { affectRotation = value; } }
+        public RotationAxis AffectedAxis { get { return affectedAxis; } set { affectedAxis = value; } }
+        public Texture2D PngMapToScan { get { return pngMapToScan; } set { pngMapToScan = value; } }
+        public ColorToPrefab[] ColorToPrefabCollection { get { return colorToPrefabCollection; } set { colorToPrefabCollection = value; } }
         /// <summary>
         /// Class data that stores a color to match a prefab GameObject.
         /// </summary>
@@ -604,6 +667,24 @@ namespace Mahrq
         {
             public Color color;
             public GameObject prefab;
+            [SerializeField]
+            [HideInInspector]
+            private string prefabAssetPath;
+
+            public void SavePrefabAssetPath()
+            {
+                if (prefab != null)
+                {
+                    prefabAssetPath = AssetDatabase.GetAssetPath(prefab);
+                }
+            }
+            public void LoadPrefabAssetPath()
+            {
+                if (!string.IsNullOrEmpty(prefabAssetPath))
+                {
+                    prefab = (GameObject)AssetDatabase.LoadAssetAtPath(prefabAssetPath, typeof(GameObject));
+                }
+            }
         }
         [System.Serializable]
         public class LevelGeneratorEditorSaveData
@@ -615,8 +696,9 @@ namespace Mahrq
             public bool _affectRotation;
             public RotationAxis _affectedAxis;
             public Texture2D _pngMapToScan;
-            public ColorToPrefab[] _colorToPrefab;
-
+            public ColorToPrefab[] _colorToPrefabCollection;
+            [SerializeField]
+            private string _pngMapAssetPath;
             public LevelGeneratorEditorSaveData()
             {
                 _presetName = "";
@@ -626,10 +708,10 @@ namespace Mahrq
                 _affectRotation = false;
                 _affectedAxis = 0;
                 _pngMapToScan = null;
-                _colorToPrefab = null;
+                _colorToPrefabCollection = null;
             }
             public void SaveData(string presetName, string levelName, float spacing, BuildCoordinate buildCoordinates, bool affectRotation,
-                                    RotationAxis affectedAxis, Texture2D pngMapToScan, ColorToPrefab[] colorToPrefab )
+                                    RotationAxis affectedAxis, Texture2D pngMapToScan, ColorToPrefab[] colorToPrefabCollection)
             {
                 _presetName = presetName;
                 _levelName = levelName;
@@ -638,11 +720,18 @@ namespace Mahrq
                 _affectRotation = affectRotation;
                 _affectedAxis = affectedAxis;
                 _pngMapToScan = pngMapToScan;
-                _colorToPrefab = colorToPrefab;
+                _colorToPrefabCollection = colorToPrefabCollection;
             }
-            public LevelGeneratorEditorSaveData LoadData()
+            public void LoadData(ref PNGLevelGeneratorEditor editor)
             {
-                return this;
+                editor.PresetName = _presetName;
+                editor.LevelName = _levelName;
+                editor.Spacing = _spacing;
+                editor.BuildCoordinates = _buildCoordinates;
+                editor.AffectRotation = _affectRotation;
+                editor.AffectedAxis = _affectedAxis;
+                editor.PngMapToScan = _pngMapToScan;
+                editor.ColorToPrefabCollection = _colorToPrefabCollection;
             }
             public void ClearData()
             {
@@ -653,7 +742,47 @@ namespace Mahrq
                 _affectRotation = false;
                 _affectedAxis = 0;
                 _pngMapToScan = null;
-                _colorToPrefab = null;
+                _colorToPrefabCollection = null;
+            }
+            public void SaveAssetPaths()
+            {
+                if (_pngMapToScan != null)
+                {
+                    _pngMapAssetPath = AssetDatabase.GetAssetPath(_pngMapToScan);
+                }
+                if (_colorToPrefabCollection != null)
+                {
+                    if (_colorToPrefabCollection.Length > 0)
+                    {
+                        for (int i = 0; i < _colorToPrefabCollection.Length; i++)
+                        {
+                            if (_colorToPrefabCollection[i] != null)
+                            {
+                                _colorToPrefabCollection[i].SavePrefabAssetPath();
+                            }
+                        }
+                    }
+                }
+            }
+            public void LoadAssetPaths()
+            {
+                if (!string.IsNullOrEmpty(_pngMapAssetPath))
+                {
+                    _pngMapToScan = (Texture2D)AssetDatabase.LoadAssetAtPath(_pngMapAssetPath, typeof(Texture2D));
+                }
+                if (_colorToPrefabCollection != null)
+                {
+                    if (_colorToPrefabCollection.Length > 0)
+                    {
+                        for (int i = 0; i < _colorToPrefabCollection.Length; i++)
+                        {
+                            if (_colorToPrefabCollection[i] != null)
+                            {
+                                _colorToPrefabCollection[i].LoadPrefabAssetPath();
+                            }
+                        }
+                    }
+                }
             }
         }
     }
